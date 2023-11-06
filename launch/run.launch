@@ -1,0 +1,4 @@
+<launch>
+ <!-- Run the motion_primitives_planner node -->
+ <node name="motion_primitives_planner_node" pkg="motion_primitives_planner" type="motion_primitives_planner_node" output="screen"/> 
+</launch>
