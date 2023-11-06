@@ -1,5 +1,12 @@
-# Motion Primitives-based Planning Algorithm. (ROS, C++)
+# Motion Primitives-based Planner Node (ROS, C++)
+
+## Intro
 Autonomous driving via motion primitives-based planner.
+
+## Running
+Launch the motion primitives-based planner node:
+
+`roslaunch motion_primitives_planner run.launch`
 
 ## TODO
 
