@@ -84,10 +84,60 @@ void MotionPlanner::PublishCommand(std::vector<Node> motionMinCost)
     - Publish data  
   */
   ackermann_msgs::AckermannDrive command;
-  command.steering_angle = 0.0;
-  command.speed = 0.0;
+  Node last_node = motionMinCost.back();
+  double delta = last_node.delta;
+
+
+  command.steering_angle = delta;
+
+
+  // start of PID control 
+  int primitive_size = motionMinCost.size();
+
+  Node look_ahead_node = motionMinCost[int(primitive_size/2)];
+
+  double error_y = look_ahead_node.y;
+
+  double kp = pow(10,(-1));
+  double ki = pow(10,(-3));
+  double kd = pow(10,(-1));
+
+  double steer = kp*error_y + ki * this->total_error_y + kd * (error_y-this->prev_error_y);
+
+  this->total_error_y += error_y;
+  this->prev_error_y = error_y;
+
+  // Control limit
+  steer = std::min(std::max(steer, -this->MAX_DELTA), this->MAX_DELTA);
+
+  // command.steering_angle = steer;
+
+  // speed control 
+  // if (this->count < 200) {
+  //   command.speed = 0.4 - 0.3 * (abs(delta/this->MAX_DELTA));
+  //   this->count += 1;
+  // }
+  // else {
+  //   if (abs(delta*180/M_PI) < 2 && abs(this->prev_delta_2*180/M_PI) < 2){
+  //     std::cout << abs(delta*180/M_PI) << std::endl;
+  //     command.speed = 1 - 0.4 * (abs(delta/this->MAX_DELTA));
+  //   }
+  //   else {
+  //     command.speed = 0.5 - 0.3 * (abs(delta/this->MAX_DELTA));
+  //   }
+  // }
+
+
+  // command.steering_angle = 0;
+  // command.speed = 0;
+  // command.speed = 0.5 - 0.4 * (abs(steer*2/this->MAX_DELTA));
+
+  command.speed = 0.5 * exp(-2.5*abs(delta));
+
+  
+  this->prev_delta_2 = delta;
   pubCommand.publish(command);
-  std::cout << "command steer/speed : " << command.steering_angle*180/M_PI << " " << command.speed << std::endl;
+  std::cout << "command steer/ speed/ delta : " << command.steering_angle*180/M_PI << " " << command.speed << " " << steer*180/M_PI << std::endl;
 }
 
 /* ----- Algorithm Functions ----- */
@@ -164,19 +214,34 @@ std::vector<Node> MotionPlanner::RolloutMotion(Node startNode,
     // x_t+1   := x_t + x_dot * dt
     // y_t+1   := y_t + y_dot * dt
     // yaw_t+1 := yaw_t + yaw_dot * dt
-    currMotionNode.x += 0.0;
-    currMotionNode.y += 0.0;
-    currMotionNode.yaw += 0.0;
+    double yaw_dot = tan(currMotionNode.delta) * this->MOTION_VEL / this->WHEELBASE;
+    currMotionNode.x += cos(currMotionNode.yaw) * this->DIST_RESOL;
+    currMotionNode.y += sin(currMotionNode.yaw) * this->DIST_RESOL;
+    currMotionNode.yaw = normalizePiToPi(currMotionNode.yaw + yaw_dot * this->TIME_RESOL);
+    
+    currMotionNode.cost_dir = abs(currMotionNode.delta);
 
-    // 2. collision checking
-    // - local to map coordinate transform
+
     Node collisionPointNode(currMotionNode.x, currMotionNode.y, currMotionNode.yaw, currMotionNode.delta, 0, 0, 0, -1, false);
     Node collisionPointNodeMap = LocalToMapCorrdinate(collisionPointNode);
-    if (CheckCollision(collisionPointNodeMap, localMap)) {
+
+    if (CheckCollision(collisionPointNodeMap, localMap, 1.2/this->DIST_RESOL)) {
+      currMotionNode.traverse_cost += 1/pow((currMotionNode.idx+2),2);
+    }
+    
+    // 2. collision checking
+    // - local to map coordinate transform
+    if (CheckCollision(collisionPointNodeMap, localMap, this->INFLATION_SIZE)) {
       // - do some process when collision occurs.
+      currMotionNode.collision = true;
+      currMotionNode.cost_colli = 1;
+      currMotionNode.idx += 1;
+      motionPrimitive.push_back(currMotionNode);
+      break;
       // - you can save collision information & calculate collision cost here.
       // - you can break and return current motion primitive or keep generate rollout.
     }
+
 
     // 3. range checking
     // - if you want to filter out motion points out of the sensor range, calculate the line-of-sight (LOS) distance & yaw angle of the node
@@ -185,13 +250,13 @@ std::vector<Node> MotionPlanner::RolloutMotion(Node startNode,
     // - if LOS distance > MAX_SENSOR_RANGE or abs(LOS_yaw) > FOV*0.5 <-- outside of sensor range 
     // - if LOS distance <= MAX_SENSOR_RANGE and abs(LOS_yaw) <= FOV*0.5 <-- inside of sensor range
     // - use params in header file (MAX_SENSOR_RANGE, FOV)
-    double LOS_DIST = 0.0;
-    double LOS_YAW = 0.0;
+    double LOS_DIST = sqrt(pow(currMotionNode.x, 2) + pow(currMotionNode.y, 2));
+    double LOS_YAW = atan2(currMotionNode.y, currMotionNode.x);
     if (LOS_DIST > this->MAX_SENSOR_RANGE || abs(LOS_YAW) > this->FOV*0.5) {
-      // -- do some process when out-of-range occurs.
-      // -- you can break and return current motion primitive or keep generate rollout.
-    } 
+      break;
+    }
 
+    currMotionNode.idx += 1;
     // append collision-free motion in the current motionPrimitive
     motionPrimitive.push_back(currMotionNode);
 
@@ -222,9 +287,29 @@ std::vector<Node> MotionPlanner::SelectMotion(std::vector<std::vector<Node>> mot
     // Iterate all motion primitive (motionPrimitive) in motionPrimitives
     for (auto& motionPrimitive : motionPrimitives) {
       // 1. Calculate cost terms
+      Node last_node = motionPrimitive.back();
+      
+      double dist = sqrt(pow(last_node.x, 2) + pow(last_node.y, 2));
+      double cost_prog = (1/dist);
+      double cost_prog_norm = (cost_prog - 1/this->MAX_PROGRESS) / (1/this->DIST_RESOL - 1/this->MAX_PROGRESS);
+      // double max_size = this->MAX_PROGRESS / this->DIST_RESOL;
+      // double cost_prog_norm = motionPrimitive.size() / max_size;
+      double cost_colli_norm = (last_node.collision == true) ? 1 : 0;
 
+      double cost_dir_norm = (last_node.cost_dir) / (this->MAX_DELTA);
+
+      double cur_delta = last_node.delta; 
+      double delta_change = abs(cur_delta - this->prev_delta) / (2*this->MAX_DELTA);
+      this->prev_delta = cur_delta;
+
+      double traverse_cost = 0;
+      for (size_t i = 0; i<motionPrimitive.size(); i++){
+        traverse_cost += motionPrimitive[i].traverse_cost;
+      }
+      double traverse_cost_norm = traverse_cost/1.6;
+      
       // 2. Calculate total cost
-      double cost_total = 0.0;
+      double cost_total =  cost_dir_norm * 10 + cost_prog_norm * 20 + 1000 * cost_colli_norm + 5 * delta_change + 3 * traverse_cost_norm;
 
       // 3. Compare & Find minimum cost & minimum cost motion
       if (cost_total < minCost) {
@@ -240,7 +325,7 @@ std::vector<Node> MotionPlanner::SelectMotion(std::vector<std::vector<Node>> mot
 
 /* ----- Util Functions ----- */
 
-bool MotionPlanner::CheckCollision(Node currentNodeMap, nav_msgs::OccupancyGrid localMap)
+bool MotionPlanner::CheckCollision(Node currentNodeMap, nav_msgs::OccupancyGrid localMap, double inflation_size)
 {
   /*
     TODO: check collision of the current node
@@ -262,6 +347,27 @@ bool MotionPlanner::CheckCollision(Node currentNodeMap, nav_msgs::OccupancyGrid 
     - use params in header file: INFLATION_SIZE, OCCUPANCY_THRES
   */
 
+int map_width = int(this->mapMaxX - this->mapMinX + 0.5f);
+map_width = int(map_width / this->mapResol + 0.5f);
+
+ int map_height = int(this->mapMaxY - this->mapMinY + 0.5f);
+  map_height = int(map_height/ this->mapResol) ;
+
+  for (int i = 0; i <= inflation_size; i++) {
+    for (int j = 0; j <= inflation_size; j++) {
+      int tmp_x = int(currentNodeMap.x + i - 0.5*inflation_size + 0.5f);
+      int tmp_y = int(currentNodeMap.y + j - 0.5*inflation_size + 0.5f);
+
+      if (tmp_x >= 0 && tmp_x <= map_width && tmp_y >= 0 && tmp_y <= map_height) {
+        int map_index = tmp_x + tmp_y * map_width;
+        int map_value = static_cast<int16_t>(localMap.data[map_index]);
+        if (map_value > this->OCCUPANCY_THRES || map_value < 0) {
+          // std::cout << "collision : " << map_value << std::endl;
+          return true;
+        }
+      }
+    }
+  }
   return false;
 }
 
@@ -288,9 +394,9 @@ Node MotionPlanner::LocalToMapCorrdinate(Node nodeLocal)
   Node nodeMap;
   memcpy(&nodeMap, &nodeLocal, sizeof(struct Node));
   // Transform from local (min x, max x) [m] to map (0, map width) [grid] coordinate
-  nodeMap.x = 0;
+  nodeMap.x = (nodeLocal.x - this->mapMinX) / this->mapResol;
   // Transform from local (min y, max y) [m] to map (0, map height) [grid] coordinate
-  nodeMap.y = 0;
+  nodeMap.y = (nodeLocal.y - this->mapMinY) / this->mapResol;
 
   return nodeMap;
 }

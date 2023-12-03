@@ -73,6 +73,7 @@ class Node
         this->cost_total = cost_total;
         this->idx = idx;
         this->collision = collision;
+        this->traverse_cost = 0;
     }
 
     // the x position
@@ -89,6 +90,8 @@ class Node
     double cost_colli;
     // the total cost
     double cost_total;
+    // traverse cost
+    double traverse_cost;
     // the index on path
     int idx;
     // flag for collision
@@ -115,7 +118,7 @@ class MotionPlanner
     std::vector<Node> SelectMotion(std::vector<std::vector<Node>> motionPrimitives);
 
     // Utils
-    bool CheckCollision(Node currentNodeMap, nav_msgs::OccupancyGrid localMap);
+    bool CheckCollision(Node currentNodeMap, nav_msgs::OccupancyGrid localMap, double inflation_size);
     Node LocalToMapCorrdinate(Node nodeLocal);
     bool CheckRunCondition();
     void PublishData(std::vector<Node> motionMinCost, std::vector<std::vector<Node>> motionPrimitives);
@@ -129,9 +132,9 @@ class MotionPlanner
     double TIME_RESOL = 0.05; // [sec] time resolution between each motion (for rollout)
     double MOTION_VEL = DIST_RESOL / TIME_RESOL; // [m/s] velocity between each motion (for rollout)
     double DELTA_RESOL = 0.5 * (M_PI / 180.0); // [rad] angle resolution for steering angle sampling
-    double MAX_DELTA = 10.0 * (M_PI / 180.0); // [rad] maximum angle for steering angle sampling
-    double MAX_PROGRESS = 5.0; // [m] max progress of motion
-    double INFLATION_SIZE = 0.5 / DIST_RESOL; // [grid] inflation size [m] / grid_res [m/grid]
+    double MAX_DELTA = 25.0 * (M_PI / 180.0); // [rad] maximum angle for steering angle sampling
+    double MAX_PROGRESS = 10.0; // [m] max progress of motion
+    double INFLATION_SIZE = 0.6 / DIST_RESOL; // [grid] inflation size [m] / grid_res [m/grid]
 
     // Map info
     // TODO: Match below parameters with your cost map 
@@ -144,6 +147,15 @@ class MotionPlanner
     double origin_y = 0.0; // [m] y position of the map origin
     std::string frame_id = "base_link"; // frame id of the map
     int OCCUPANCY_THRES = 50; // occupancy value threshold
+
+
+    double prev_delta = 0;
+    double prev_delta_2 = 0;
+
+    int count = 0;
+
+    double prev_error_y = 0;
+    double total_error_y = 0;
     
   private:
     // Input
