@@ -132,7 +132,7 @@ class MotionPlanner
     double TIME_RESOL = 0.05; // [sec] time resolution between each motion (for rollout)
     double MOTION_VEL = DIST_RESOL / TIME_RESOL; // [m/s] velocity between each motion (for rollout)
     double DELTA_RESOL = 0.5 * (M_PI / 180.0); // [rad] angle resolution for steering angle sampling
-    double MAX_DELTA = 25.0 * (M_PI / 180.0); // [rad] maximum angle for steering angle sampling
+    double MAX_DELTA = 14.0 * (M_PI / 180.0); // [rad] maximum angle for steering angle sampling
     double MAX_PROGRESS = 10.0; // [m] max progress of motion
     double INFLATION_SIZE = 0.6 / DIST_RESOL; // [grid] inflation size [m] / grid_res [m/grid]
 

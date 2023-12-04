@@ -132,7 +132,7 @@ void MotionPlanner::PublishCommand(std::vector<Node> motionMinCost)
   // command.speed = 0;
   // command.speed = 0.5 - 0.4 * (abs(steer*2/this->MAX_DELTA));
 
-  command.speed = 0.5 * exp(-2.5*abs(delta));
+  command.speed = 0.4 * exp(-3.5 *abs(delta));
 
   
   this->prev_delta_2 = delta;
@@ -309,7 +309,7 @@ std::vector<Node> MotionPlanner::SelectMotion(std::vector<std::vector<Node>> mot
       double traverse_cost_norm = traverse_cost/1.6;
       
       // 2. Calculate total cost
-      double cost_total =  cost_dir_norm * 10 + cost_prog_norm * 20 + 1000 * cost_colli_norm + 5 * delta_change + 3 * traverse_cost_norm;
+      double cost_total =  cost_dir_norm * 5 + cost_prog_norm * 20 + 1000 * cost_colli_norm + 5 * delta_change + 4 * traverse_cost_norm;
 
       // 3. Compare & Find minimum cost & minimum cost motion
       if (cost_total < minCost) {
